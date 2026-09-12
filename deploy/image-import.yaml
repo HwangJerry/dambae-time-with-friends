@@ -1,0 +1,29 @@
+# Temporary image loader; delete after importing. Only the selected node is touched.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: smoking-room-image-import
+  namespace: smoking-room
+spec:
+  nodeName: jerryhwang-16z90p-oa76k
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  containers:
+    - name: importer
+      image: alpine:3.22
+      command: [sleep, '3600']
+      volumeMounts:
+        - name: containerd
+          mountPath: /run/k3s/containerd/containerd.sock
+        - name: k3s
+          mountPath: /bin/k3s
+          readOnly: true
+  volumes:
+    - name: containerd
+      hostPath:
+        path: /run/k3s/containerd/containerd.sock
+        type: Socket
+    - name: k3s
+      hostPath:
+        path: /usr/local/bin/k3s
+        type: File

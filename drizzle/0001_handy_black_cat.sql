@@ -1,0 +1,1 @@
+ALTER TABLE `participants` ADD `connection_id` text DEFAULT '' NOT NULL;

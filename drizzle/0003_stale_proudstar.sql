@@ -1,0 +1,1 @@
+ALTER TABLE `participants` ADD `avatar` text DEFAULT 'male' NOT NULL;
