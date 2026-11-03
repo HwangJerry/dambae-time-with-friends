@@ -12,6 +12,8 @@ from uuid import UUID
 from .contract import (DIGEST, SHA, ConfigurationError, database_gate, local_path,
                        manifest, require, target_profile)
 from .gitops import ArgoCD, GitOps
+from .locking import signing_lock
+from .mobile_identity import identity
 
 COMMAND_TIMEOUT_SECONDS = 1800
 ROLLOUT_TIMEOUT_SECONDS = 600
@@ -52,14 +54,16 @@ def build(root, component_id, source_sha, *, run=execute):
               'manifest_sha256': hashlib.sha256(local_path(root, '.malfunction/deploy.json').read_bytes()).hexdigest()}
     recipe = component['build']
     if component['kind'] in ('android', 'ios'):
-        run(['bundle', 'exec', 'fastlane', component['kind'], recipe['lane']], cwd=directory)
+        with signing_lock():
+            run(['bundle', 'exec', 'fastlane', component['kind'], recipe['lane']], cwd=directory)
         artifact = local_path(root, recipe['artifact'])
         require(artifact.is_file(), 'fastlane 빌드 산출물을 찾지 못했어요.')
         relative = f'.malfunction/output/{component_id}/application' + artifact.suffix
         exported = local_path(root, relative)
         exported.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(artifact, exported)
-        result.update(file=relative, sha256=hashlib.sha256(exported.read_bytes()).hexdigest())
+        result.update(file=relative, sha256=hashlib.sha256(exported.read_bytes()).hexdigest(),
+                      mobile=identity(exported, component['kind']))
         return result
     dockerfile = local_path(root, recipe['dockerfile'])
     context = local_path(root, recipe['context'])
@@ -119,6 +123,9 @@ def mobile_release(root, component, artifact, profile, request_id, *, environ, r
     filename = local_path(root, artifact['file'])
     require(filename.is_file() and hashlib.sha256(filename.read_bytes()).hexdigest() == artifact['sha256'],
             '모바일 산출물 해시가 빌드 결과와 달라요.')
+    mobile = artifact.get('mobile', {})
+    require(mobile.get('app_id') == profile['app_id'] and mobile.get('version') and mobile.get('build_number'),
+            '모바일 산출물의 앱 식별자·버전이 운영 대상과 달라요.')
     env = dict(environ, MALFUNCTION_APP_ID=profile['app_id'], MALFUNCTION_ARTIFACT=str(filename))
     # Store metadata and credentials must be supplied by the operator. Nothing is invented.
     if component['kind'] == 'ios':
@@ -135,6 +142,8 @@ def mobile_release(root, component, artifact, profile, request_id, *, environ, r
                    'json_key:' + env['SUPPLY_JSON_KEY'], 'package_name:' + profile['app_id'],
                    'aab:' + str(filename), 'track:production', 'release_status:completed',
                    'skip_upload_metadata:true', 'skip_upload_images:true', 'skip_upload_screenshots:true']
-    run(command, cwd=local_path(root, component['root']), env=env)
+    with signing_lock():
+        run(command, cwd=local_path(root, component['root']), env=env)
     return {'status': 'submitted', 'component': component['id'], 'source_sha': artifact['source_sha'],
+            'mobile': mobile,
             'request_id': request_id, 'reason': '스토어에 제출했어요. 심사 승인·출시 완료는 별도 상태 확인이 필요해요.'}

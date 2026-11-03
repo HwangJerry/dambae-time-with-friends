@@ -1,6 +1,7 @@
 """Bounded HTTP calls; secrets and upstream response bodies never enter errors."""
 import json
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 TIMEOUT_SECONDS = 20
@@ -22,12 +23,14 @@ class Http:
     def __init__(self, opener=None):
         self.opener = opener or build_opener(NoRedirect())
 
-    def json(self, url, *, token='', method='GET', body=None):
+    def json(self, url, *, token='', method='GET', body=None, form=False):
         headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Malfunction-Harness'}
+        if form:
+            headers['Content-Type'] = 'application/x-www-form-urlencoded'
         if token:
             headers['Authorization'] = 'Bearer ' + token
         request = Request(url, method=method, headers=headers,
-                          data=None if body is None else json.dumps(body).encode())
+                          data=None if body is None else (urlencode(body) if form else json.dumps(body)).encode())
         try:
             with self.opener.open(request, timeout=TIMEOUT_SECONDS) as response:
                 raw = response.read(MAX_BYTES + 1)
@@ -44,9 +47,9 @@ class Http:
         except (URLError, OSError, ValueError):
             raise RemoteError() from None
 
-    def healthy(self, url):
+    def healthy(self, url, *, timeout=TIMEOUT_SECONDS):
         try:
-            with self.opener.open(Request(url, headers={'User-Agent': 'Malfunction-Harness'}), timeout=TIMEOUT_SECONDS) as response:
+            with self.opener.open(Request(url, headers={'User-Agent': 'Malfunction-Harness'}), timeout=timeout) as response:
                 return response.status == 200
         except (HTTPError, URLError, OSError):
             return False

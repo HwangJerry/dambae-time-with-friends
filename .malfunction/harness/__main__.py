@@ -42,6 +42,11 @@ def main():
         return 0
     except (ValueError, RuntimeError, OSError) as error:
         print(str(error), file=sys.stderr)
+        if args.operation == 'release' and args.output:
+            output = Path(args.output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps({'status': 'failed', 'component': args.component,
+                'source_sha': args.sha, 'request_id': args.request_id, 'reason': str(error)[:1000]}, ensure_ascii=False) + '\n')
         return 1
 
 

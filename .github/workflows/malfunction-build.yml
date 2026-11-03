@@ -34,6 +34,7 @@ jobs:
       COMPONENT: ${{ matrix.id }}
       IMAGE: ${{ matrix.image }}
       GH_TOKEN: ${{ github.token }}
+      BUNDLETOOL_JAR: ${{ vars.BUNDLETOOL_JAR }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: {ref: '${{ env.SOURCE_SHA }}', persist-credentials: false}

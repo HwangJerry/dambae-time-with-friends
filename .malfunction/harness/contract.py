@@ -145,6 +145,8 @@ def target_profile(value, source, component):
                 '운영 설정 GitHub 저장소가 필요해요.')
         path(value.get('path'))
         https_url(value.get('server')); https_url(value.get('health_url'))
+        if 'cluster_server' in value:
+            https_url(value['cluster_server'])
     else:
         require(component['kind'] in ('android', 'ios'), '모바일 배포 단위가 아니에요.')
         require(value.get('registered') is True, '스토어 최초 등록을 완료해야 해요.')

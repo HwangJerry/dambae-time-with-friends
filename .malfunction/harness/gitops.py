@@ -96,7 +96,8 @@ class ArgoCD:
         expected_repo = 'https://github.com/' + profile['repository']
         require(source.get('repoURL', '').removesuffix('.git') == expected_repo and source.get('path') == profile['path']
                 and source.get('targetRevision') == profile['branch'] and spec.get('project') == profile['project']
-                and spec.get('destination', {}).get('namespace') == profile['namespace'],
+                and spec.get('destination', {}).get('namespace') == profile['namespace']
+                and spec.get('destination', {}).get('server') == profile.get('cluster_server', 'https://kubernetes.default.svc'),
                 'Argo CD 앱과 승인된 배포 대상 프로필이 달라요.')
         status = app.get('status', {})
         if status.get('sync', {}).get('status') != 'Synced' or status.get('health', {}).get('status') != 'Healthy':
