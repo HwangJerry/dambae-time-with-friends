@@ -53,6 +53,33 @@ def commands(value):
                 '검증 명령은 shell 문자열이 아닌 인자 목록이어야 해요.')
 
 
+def test_configuration(build):
+    if 'prepare' in build:
+        commands(build['prepare'])
+    environments = [build.get('test_env', {})]
+    services = build.get('test_services', [])
+    require(isinstance(services, list) and len(services) <= 4, '검증용 서비스는 최대 4개까지 지정할 수 있어요.')
+    ids = set()
+    for service in services:
+        require(isinstance(service, dict) and isinstance(service.get('id'), str)
+                and ID.fullmatch(service['id']) and service['id'] not in ids, '검증용 서비스 ID를 확인해 주세요.')
+        ids.add(service['id'])
+        commands([service.get('command')])
+        if 'root' in service:
+            path(service['root'])
+        url = urlparse(service.get('health_url', ''))
+        require(url.scheme == 'http' and url.hostname in ('127.0.0.1', 'localhost', '::1')
+                and url.port and not url.username and not url.password and not url.fragment,
+                '검증용 서비스는 포트가 명시된 loopback HTTP 주소만 사용할 수 있어요.')
+        timeout = service.get('ready_timeout_seconds', 60)
+        require(type(timeout) is int and 1 <= timeout <= 180, '검증 서비스 준비 시간은 1~180초예요.')
+        environments.append(service.get('env', {}))
+    for env in environments:
+        require(isinstance(env, dict) and all(isinstance(key, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key)
+                and isinstance(value, str) and '\x00' not in value for key, value in env.items()),
+                '검증 환경 변수는 문자열 이름·값으로 지정해 주세요.')
+
+
 def manifest(value):
     require(isinstance(value, dict) and type(value.get('version')) is int and value['version'] == 2,
             '실행 가능한 배포 설정은 version 2여야 해요.')
@@ -78,6 +105,7 @@ def manifest(value):
         build = item.get('build')
         require(isinstance(build, dict), '빌드 설정이 필요해요.')
         commands(build.get('checks'))
+        test_configuration(build)
         if 'node' in build:
             require(isinstance(build['node'], str) and re.fullmatch(r'\d+(?:\.\d+){0,2}', build['node']),
                     'Node 버전은 명시적인 버전 번호여야 해요.')

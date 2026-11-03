@@ -5,12 +5,12 @@ from pathlib import Path
 import sys
 
 from .contract import manifest
-from .runner import build, release, ReleaseUncertain
+from .runner import build, check, release, ReleaseUncertain
 
 
 def main():
     parser = argparse.ArgumentParser(description='Malfunction portable deployment harness')
-    parser.add_argument('operation', choices=['matrix', 'validate', 'build', 'release'])
+    parser.add_argument('operation', choices=['matrix', 'validate', 'check', 'build', 'release'])
     parser.add_argument('--root', default='.')
     parser.add_argument('--component')
     parser.add_argument('--sha')
@@ -27,6 +27,8 @@ def main():
                                    'node': c['build'].get('node', ''),
                                    'runner': ['self-hosted', 'macOS', 'malfunction-ios'] if c['kind'] == 'ios' else 'ubuntu-latest'}
                                   for c in config['components'] if c['kind'] != 'shared']}
+        elif args.operation == 'check':
+            result = check(root, args.component, args.sha)
         elif args.operation == 'build':
             result = build(root, args.component, args.sha)
         else:

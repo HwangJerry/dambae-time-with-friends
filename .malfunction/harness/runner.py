@@ -15,6 +15,7 @@ from .gitops import ArgoCD, GitOps
 from .locking import signing_lock
 from .mobile_identity import identity
 from .http import RemoteError
+from .checks import run_checks
 
 COMMAND_TIMEOUT_SECONDS = 1800
 ROLLOUT_TIMEOUT_SECONDS = 600
@@ -53,8 +54,7 @@ def build(root, component_id, source_sha, *, run=execute):
     require(repository_sha(root) == source_sha, '요청한 커밋과 체크아웃한 커밋이 달라요.')
     component = component_at(root, component_id)
     directory = local_path(root, component['root'])
-    for argv in component['build']['checks']:
-        run(argv, cwd=directory)
+    run_checks(root, component, run)
     result = {'version': 1, 'component': component_id, 'source_sha': source_sha,
               'manifest_sha256': hashlib.sha256(local_path(root, '.malfunction/deploy.json').read_bytes()).hexdigest()}
     recipe = component['build']
@@ -84,6 +84,12 @@ def build(root, component_id, source_sha, *, run=execute):
         require(isinstance(digest, str) and DIGEST.fullmatch(digest), '빌드 이미지 digest가 필요해요.')
         result['image'] = recipe['image'] + '@' + digest
     return result
+
+
+def check(root, component_id, source_sha, *, run=execute):
+    require(repository_sha(root) == source_sha, '요청한 커밋과 체크아웃한 커밋이 달라요.')
+    run_checks(root, component_at(root, component_id), run)
+    return {'status': 'checks_passed', 'component': component_id, 'source_sha': source_sha, 'deployed': False}
 
 
 def release(root, component_id, source_sha, artifact, request_id, profiles, *, environ=None,
