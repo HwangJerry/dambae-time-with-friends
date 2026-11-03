@@ -1,0 +1,77 @@
+name: Malfunction build
+on:
+  push:
+    branches: [main, master]
+  workflow_call:
+    inputs:
+      commit_sha: {required: true, type: string}
+permissions:
+  contents: read
+  packages: write
+  actions: read
+env:
+  PYTHONPATH: .malfunction
+  SOURCE_SHA: ${{ inputs.commit_sha || github.sha }}
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {ref: '${{ env.SOURCE_SHA }}', persist-credentials: false}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.12'}
+      - id: matrix
+        run: echo "value=$(python -m harness matrix)" >> "$GITHUB_OUTPUT"
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      COMPONENT: ${{ matrix.id }}
+      IMAGE: ${{ matrix.image }}
+      GH_TOKEN: ${{ github.token }}
+      BUNDLETOOL_JAR: ${{ vars.BUNDLETOOL_JAR }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {ref: '${{ env.SOURCE_SHA }}', persist-credentials: false}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.12'}
+      - name: Reuse verified build for this source commit
+        id: cached
+        shell: bash
+        run: |
+          set -euo pipefail
+          prior=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow malfunction-build.yml --commit "$SOURCE_SHA" --status success --json databaseId,event --jq '[.[] | select(.event == "push")][0].databaseId // empty')
+          if [ -n "$prior" ] && gh run download "$prior" --repo "$GITHUB_REPOSITORY" -n "malfunction-build-$COMPONENT-$SOURCE_SHA" -D ".malfunction/output/$COMPONENT"; then
+            echo 'hit=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: steps.cached.outputs.hit != 'true' && matrix.node != ''
+        with: {node-version: '${{ matrix.node }}'}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+        if: steps.cached.outputs.hit != 'true' && matrix.image != ''
+      - name: Authenticate image registry
+        if: steps.cached.outputs.hit != 'true' && matrix.image != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          registry=${IMAGE%%/*}
+          if [ "$registry" != 'ghcr.io' ]; then
+            echo 'Configure an explicit registry authentication step for this registry.' >&2
+            exit 1
+          fi
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Validate and build
+        if: steps.cached.outputs.hit != 'true'
+        run: python -m harness build --component "$COMPONENT" --sha "$SOURCE_SHA" --output ".malfunction/output/$COMPONENT/build.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: malfunction-build-${{ matrix.id }}-${{ env.SOURCE_SHA }}
+          path: .malfunction/output/${{ matrix.id }}/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

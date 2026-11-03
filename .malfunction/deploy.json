@@ -1,0 +1,83 @@
+{
+  "version": 2,
+  "components": [
+    {
+      "id": "app",
+      "kind": "web-backend",
+      "root": ".",
+      "watch": [
+        "**"
+      ],
+      "target": "production-app",
+      "database": {
+        "policy": "reviewed",
+        "watch": [
+          "drizzle/**",
+          "db/**",
+          "server/**",
+          "drizzle.config.ts"
+        ],
+        "approved": {}
+      },
+      "build": {
+        "context": ".",
+        "dockerfile": "Dockerfile",
+        "platform": "linux/amd64",
+        "image": "ghcr.io/hwangjerry/dambae-time-with-friends-app",
+        "checks": [
+          [
+            "npm",
+            "run",
+            "lint"
+          ],
+          [
+            "npm",
+            "run",
+            "typecheck"
+          ],
+          [
+            "npm",
+            "run",
+            "test:api"
+          ],
+          [
+            "npm",
+            "run",
+            "test:spatial"
+          ]
+        ],
+        "node": "22",
+        "prepare": [
+          [
+            "npm",
+            "ci"
+          ],
+          [
+            "npm",
+            "run",
+            "build"
+          ]
+        ],
+        "test_env": {
+          "TEST_ORIGIN": "http://127.0.0.1:43127"
+        },
+        "test_services": [
+          {
+            "id": "api",
+            "command": [
+              "node",
+              "server/start.mjs"
+            ],
+            "health_url": "http://127.0.0.1:43127/healthz",
+            "ready_timeout_seconds": 120,
+            "env": {
+              "HOST": "127.0.0.1",
+              "PORT": "43127",
+              "DATA_DIR": "${MALFUNCTION_TEST_DIR}/database"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
