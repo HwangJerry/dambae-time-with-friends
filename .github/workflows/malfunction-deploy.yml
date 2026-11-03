@@ -1,0 +1,69 @@
+name: Malfunction deployment
+run-name: "malfunction:${{ inputs.request_id }}"
+on:
+  workflow_dispatch:
+    inputs:
+      request_id: {required: true, type: string}
+      commit_sha: {required: true, type: string}
+permissions:
+  contents: read
+  packages: write
+  actions: read
+concurrency:
+  group: malfunction-production-${{ github.repository }}
+  cancel-in-progress: false
+env:
+  PYTHONPATH: .malfunction
+  SOURCE_SHA: ${{ inputs.commit_sha }}
+  REQUEST_ID: ${{ inputs.request_id }}
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+    steps:
+      - name: Reject re-running an old release request
+        run: test "$GITHUB_RUN_ATTEMPT" = 1 || { echo 'Create a new manual release request in the admin UI.' >&2; exit 1; }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {ref: '${{ env.SOURCE_SHA }}', persist-credentials: false}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.12'}
+      - id: matrix
+        run: echo "value=$(python -m harness matrix)" >> "$GITHUB_OUTPUT"
+  build:
+    uses: ./.github/workflows/malfunction-build.yml
+    with: {commit_sha: '${{ inputs.commit_sha }}'}
+  release:
+    needs: [plan, build]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: [self-hosted, malfunction-release]
+    environment: malfunction-production
+    timeout-minutes: 30
+    env:
+      COMPONENT: ${{ matrix.id }}
+      MALFUNCTION_TARGETS_JSON: ${{ vars.MALFUNCTION_TARGETS_JSON }}
+      MALFUNCTION_GITOPS_TOKEN: ${{ secrets.MALFUNCTION_GITOPS_TOKEN }}
+      MALFUNCTION_ARGOCD_TOKEN: ${{ secrets.MALFUNCTION_ARGOCD_TOKEN }}
+      APP_STORE_CONNECT_API_KEY_PATH: ${{ vars.APP_STORE_CONNECT_API_KEY_PATH }}
+      SUPPLY_JSON_KEY: ${{ vars.SUPPLY_JSON_KEY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {ref: '${{ env.SOURCE_SHA }}', persist-credentials: false}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: malfunction-build-${{ matrix.id }}-${{ env.SOURCE_SHA }}
+          path: .malfunction/output/${{ matrix.id }}/
+      - name: Promote and verify release
+        run: python -m harness release --component "$COMPONENT" --sha "$SOURCE_SHA" --request-id "$REQUEST_ID" --artifact ".malfunction/output/$COMPONENT/build.json" --output ".malfunction/result/$COMPONENT.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: malfunction-result-${{ matrix.id }}
+          path: .malfunction/result/${{ matrix.id }}.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 90

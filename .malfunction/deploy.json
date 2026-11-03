@@ -1,0 +1,57 @@
+{
+  "version": 2,
+  "components": [
+    {
+      "id": "app",
+      "kind": "web-backend",
+      "root": ".",
+      "watch": [
+        "**"
+      ],
+      "target": "production-app",
+      "database": {
+        "policy": "reviewed",
+        "watch": [
+          "drizzle/**",
+          "db/**",
+          "server/**",
+          "drizzle.config.ts"
+        ],
+        "approved": {}
+      },
+      "build": {
+        "context": ".",
+        "dockerfile": "Dockerfile",
+        "platform": "linux/amd64",
+        "image": "ghcr.io/hwangjerry/dambae-time-with-friends-app",
+        "checks": [
+          [
+            "npm",
+            "ci"
+          ],
+          [
+            "npm",
+            "run",
+            "lint"
+          ],
+          [
+            "npm",
+            "run",
+            "typecheck"
+          ],
+          [
+            "npm",
+            "run",
+            "test:api"
+          ],
+          [
+            "npm",
+            "run",
+            "test:spatial"
+          ]
+        ],
+        "node": "22"
+      }
+    }
+  ]
+}
