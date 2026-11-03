@@ -45,8 +45,6 @@ jobs:
     env:
       COMPONENT: ${{ matrix.id }}
       MALFUNCTION_TARGETS_JSON: ${{ vars.MALFUNCTION_TARGETS_JSON }}
-      MALFUNCTION_GITOPS_TOKEN: ${{ secrets.MALFUNCTION_GITOPS_TOKEN }}
-      MALFUNCTION_ARGOCD_TOKEN: ${{ secrets.MALFUNCTION_ARGOCD_TOKEN }}
       APP_STORE_CONNECT_API_KEY_PATH: ${{ vars.APP_STORE_CONNECT_API_KEY_PATH }}
       SUPPLY_JSON_KEY: ${{ vars.SUPPLY_JSON_KEY }}
     steps:
@@ -58,7 +56,25 @@ jobs:
         with:
           name: malfunction-build-${{ matrix.id }}-${{ env.SOURCE_SHA }}
           path: .malfunction/output/${{ matrix.id }}/
+      - name: Check GitOps App scope
+        if: matrix.image != '' && vars.MALFUNCTION_GITOPS_APP_ID != ''
+        env:
+          APP_OWNER: ${{ vars.MALFUNCTION_GITOPS_OWNER }}
+          APP_REPOSITORIES: ${{ vars.MALFUNCTION_GITOPS_REPOSITORIES }}
+        run: test -n "$APP_OWNER" && test -n "$APP_REPOSITORIES"
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        id: gitops-app
+        if: matrix.image != '' && vars.MALFUNCTION_GITOPS_APP_ID != ''
+        with:
+          app-id: ${{ vars.MALFUNCTION_GITOPS_APP_ID }}
+          private-key: ${{ secrets.MALFUNCTION_GITOPS_APP_PRIVATE_KEY }}
+          owner: ${{ vars.MALFUNCTION_GITOPS_OWNER }}
+          repositories: ${{ vars.MALFUNCTION_GITOPS_REPOSITORIES }}
+          permission-contents: write
       - name: Promote and verify release
+        env:
+          MALFUNCTION_GITOPS_TOKEN: ${{ steps.gitops-app.outputs.token || secrets.MALFUNCTION_GITOPS_TOKEN }}
+          MALFUNCTION_ARGOCD_TOKEN: ${{ secrets.MALFUNCTION_ARGOCD_TOKEN }}
         run: python -m harness release --component "$COMPONENT" --sha "$SOURCE_SHA" --request-id "$REQUEST_ID" --artifact ".malfunction/output/$COMPONENT/build.json" --output ".malfunction/result/$COMPONENT.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
