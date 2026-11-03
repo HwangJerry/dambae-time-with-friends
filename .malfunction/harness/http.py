@@ -23,7 +23,7 @@ class Http:
     def __init__(self, opener=None):
         self.opener = opener or build_opener(NoRedirect())
 
-    def json(self, url, *, token='', method='GET', body=None, form=False):
+    def json(self, url, *, token='', method='GET', body=None, form=False, timeout=TIMEOUT_SECONDS):
         headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Malfunction-Harness'}
         if form:
             headers['Content-Type'] = 'application/x-www-form-urlencoded'
@@ -32,7 +32,7 @@ class Http:
         request = Request(url, method=method, headers=headers,
                           data=None if body is None else (urlencode(body) if form else json.dumps(body)).encode())
         try:
-            with self.opener.open(request, timeout=TIMEOUT_SECONDS) as response:
+            with self.opener.open(request, timeout=timeout) as response:
                 raw = response.read(MAX_BYTES + 1)
                 if len(raw) > MAX_BYTES:
                     raise RemoteError()

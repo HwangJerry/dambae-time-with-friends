@@ -34,6 +34,7 @@ jobs:
     uses: ./.github/workflows/malfunction-build.yml
     with: {commit_sha: '${{ inputs.commit_sha }}'}
   release:
+    name: release-${{ matrix.id }}
     needs: [plan, build]
     strategy:
       fail-fast: false

@@ -14,10 +14,15 @@ from .contract import (DIGEST, SHA, ConfigurationError, database_gate, local_pat
 from .gitops import ArgoCD, GitOps
 from .locking import signing_lock
 from .mobile_identity import identity
+from .http import RemoteError
 
 COMMAND_TIMEOUT_SECONDS = 1800
 ROLLOUT_TIMEOUT_SECONDS = 600
 OBSERVE_INTERVAL_SECONDS = 10
+
+
+class ReleaseUncertain(RuntimeError):
+    """A write may have happened. Human reconciliation must precede another release."""
 
 
 def execute(argv, *, cwd, env=None):
@@ -106,17 +111,27 @@ def release(root, component_id, source_sha, artifact, request_id, profiles, *, e
     argocd = argocd or ArgoCD(argo_token)
     # Check target identity before changing desired state.
     argocd.observe(profile, artifact, request_id)
-    promotion = gitops.promote(profile, artifact, request_id)
-    argocd.request_sync(profile, promotion)
-    print(json.dumps({'stage': 'promoted', 'component': component_id, 'request_id': request_id}), flush=True)
-    deadline = clock() + ROLLOUT_TIMEOUT_SECONDS
-    while clock() < deadline:
-        result = argocd.observe(profile, artifact, request_id)
-        if result['status'] == 'succeeded':
-            return dict(result, component=component_id, source_sha=source_sha, request_id=request_id, promotion=promotion)
-        sleep(OBSERVE_INTERVAL_SECONDS)
+    try:
+        promotion = gitops.promote(profile, artifact, request_id)
+    except RemoteError as error:
+        if error.status in (401, 403, 404, 409, 422):
+            raise
+        raise ReleaseUncertain('운영 설정 반영 여부가 불확실해요. GitOps 요청 ID를 확인하기 전에는 다음 배포를 실행하지 않아요.') from None
+    except (KeyError, TypeError):
+        raise ReleaseUncertain('운영 설정 반영 응답을 확인하지 못했어요. 실제 GitOps 상태를 확인해 주세요.') from None
+    try:
+        argocd.request_sync(profile, promotion)
+        print(json.dumps({'stage': 'promoted', 'component': component_id, 'request_id': request_id}), flush=True)
+        deadline = clock() + ROLLOUT_TIMEOUT_SECONDS
+        while clock() < deadline:
+            result = argocd.observe(profile, artifact, request_id)
+            if result['status'] == 'succeeded':
+                return dict(result, component=component_id, source_sha=source_sha, request_id=request_id, promotion=promotion)
+            sleep(OBSERVE_INTERVAL_SECONDS)
+    except (RuntimeError, ValueError, OSError, KeyError, TypeError):
+        raise ReleaseUncertain('운영 설정 반영 후 동기화 결과를 확인하지 못했어요. Argo CD의 실제 상태 확인이 필요해요.') from None
     # A timeout is not rollback permission; GitOps may converge after this process stops.
-    raise RuntimeError('운영 설정은 반영됐지만 배포 확인 시간이 지났어요. Argo CD에서 실제 상태를 확인해 주세요.')
+    raise ReleaseUncertain('운영 설정은 반영됐지만 배포 확인 시간이 지났어요. Argo CD에서 실제 상태를 확인해 주세요.')
 
 
 def mobile_release(root, component, artifact, profile, request_id, *, environ, run):
@@ -143,7 +158,10 @@ def mobile_release(root, component, artifact, profile, request_id, *, environ, r
                    'aab:' + str(filename), 'track:production', 'release_status:completed',
                    'skip_upload_metadata:true', 'skip_upload_images:true', 'skip_upload_screenshots:true']
     with signing_lock():
-        run(command, cwd=local_path(root, component['root']), env=env)
+        try:
+            run(command, cwd=local_path(root, component['root']), env=env)
+        except (RuntimeError, OSError):
+            raise ReleaseUncertain('fastlane 제출 단계가 완료되지 않았어요. 일부 업로드가 반영됐을 수 있어 스토어·실행 로그 확인 전에는 다음 제출을 막아요.') from None
     return {'status': 'submitted', 'component': component['id'], 'source_sha': artifact['source_sha'],
             'mobile': mobile,
             'request_id': request_id, 'reason': '스토어에 제출했어요. 심사 승인·출시 완료는 별도 상태 확인이 필요해요.'}
